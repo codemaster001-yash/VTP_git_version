@@ -1,0 +1,7 @@
+{
+  "name": "Visual Trip Planner",
+  "description": "An interactive, map-based travel planner powered by Gemini AI. Design itineraries, manage accommodations, and visualize your journey.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
