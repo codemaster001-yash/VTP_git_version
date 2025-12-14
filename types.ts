@@ -61,6 +61,10 @@ export interface TripItem {
   category: ExpenseCategory;
   type: 'Stop' | 'Activity';
   
+  // UI States (Persisted)
+  isExpanded?: boolean; // For Itinerary Panel
+  isTransportInfoExpanded?: boolean; // For Map HUD
+
   // Sub-itinerary items
   subItems?: SubItem[];
 
@@ -86,6 +90,14 @@ export interface Trip {
   startDate: string;
   endDate: string;
   backgroundImage?: string; // Custom user uploaded map/image
+  backgroundOpacity?: number; // Opacity of the background image
+  
+  // Map View State
+  mapView?: {
+      zoom: number;
+      pan: { x: number; y: number };
+  };
+
   items: TripItem[];
   accommodations: Accommodation[];
   totalBudget: number;

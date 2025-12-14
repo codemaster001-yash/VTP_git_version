@@ -18,7 +18,6 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSele
   const [isSearching, setIsSearching] = useState(false);
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
 
   // -- Helper: Calculate Duration at Stop --
   // Time spent at Stop[i] is from Arrival at Stop[i] to Departure from Stop[i]
@@ -46,8 +45,6 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSele
       if (diff < 0) return null;
 
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      // Calculate nights (usually floor of days, or rounded depending on exact check-in/out logic, standard is just calendar days spanned)
-      // A simple approximation:
       return { days, nights: days };
   };
 
@@ -72,12 +69,11 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSele
         type: 'Stop',
         notes: '',
         transportToNext: TransportType.CAR,
-        subItems: []
+        subItems: [],
+        isExpanded: true // Auto expand new items
       };
       setItems([...items, newItem]);
       setSearchQuery('');
-      // Auto expand the new item
-      setExpandedItems(prev => new Set(prev).add(newItem.id));
     } else {
       alert("Could not find location. Try a more specific name.");
     }
@@ -109,10 +105,10 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSele
   // -- Sub Items --
   const toggleExpand = (id: string, e?: React.MouseEvent) => {
       if (e) e.stopPropagation();
-      const next = new Set(expandedItems);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      setExpandedItems(next);
+      const item = items.find(i => i.id === id);
+      if (item) {
+        handleUpdateItem(id, { isExpanded: !item.isExpanded });
+      }
   };
 
   const calculateTotalCost = (subItems: SubItem[]) => {
@@ -134,13 +130,9 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSele
       const newSubItems = [...(item.subItems || []), newSub];
       handleUpdateItem(itemId, { 
           subItems: newSubItems,
-          cost: calculateTotalCost(newSubItems)
+          cost: calculateTotalCost(newSubItems),
+          isExpanded: true // Ensure panel is expanded to see the new item
       });
-      
-      // Ensure panel is expanded to see the new item
-      if (!expandedItems.has(itemId)) {
-          setExpandedItems(prev => new Set(prev).add(itemId));
-      }
   };
 
   const handleUpdateSubItem = (itemId: string, subId: string, updates: Partial<SubItem>) => {
@@ -248,6 +240,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSele
 
         {items.map((item, index) => {
             const duration = getStopDuration(index);
+            const isItemExpanded = !!item.isExpanded;
 
             return (
                 <div 
@@ -296,9 +289,9 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSele
                                     <button 
                                         onClick={(e) => toggleExpand(item.id, e)} 
                                         className="text-slate-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition-colors"
-                                        title={expandedItems.has(item.id) ? "Collapse" : "Expand"}
+                                        title={isItemExpanded ? "Collapse" : "Expand"}
                                     >
-                                        {expandedItems.has(item.id) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                        {isItemExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                                     </button>
                                     <button onClick={(e) => { e.stopPropagation(); setItems(items.filter(i => i.id !== item.id)); }} className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-red-50">
                                         <Trash2 className="w-3.5 h-3.5" />
@@ -319,7 +312,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSele
                     </div>
 
                     {/* Collapsible Sub Items Area */}
-                    {expandedItems.has(item.id) && (
+                    {isItemExpanded && (
                         <div className="ml-8 animate-in slide-in-from-top-2 duration-200">
                             {/* Sub Items List */}
                             {(item.subItems && item.subItems.length > 0) && (

@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Trip, TripItem, Accommodation, ExpenseCategory, TransportType, SubItem, TransportDetails } from './types';
@@ -8,7 +9,8 @@ import AIPlanner from './components/AIPlanner';
 import TripHistory from './components/TripHistory';
 import AboutModal from './components/AboutModal';
 import FinalReport from './components/FinalReport';
-import { Layout, Map as MapIcon, PieChart, Sparkles, Share2, Menu, Save, History as HistoryIcon, Edit2, Calendar, HelpCircle, Download, Upload, Plane, Hotel, MapPin, IndianRupee, Clock, FileText, FilePlus } from 'lucide-react';
+import { storageService } from './services/storageService';
+import { Layout, Map as MapIcon, PieChart, Sparkles, Share2, Menu, Save, History as HistoryIcon, Edit2, Calendar, HelpCircle, Download, Upload, Plane, Hotel, MapPin, IndianRupee, Clock, FileText, FilePlus, Loader2 } from 'lucide-react';
 
 const INITIAL_TRIP: Trip = {
   id: crypto.randomUUID(),
@@ -20,20 +22,15 @@ const INITIAL_TRIP: Trip = {
   totalBudget: 50000, 
   createdAt: Date.now(),
   returnTrip: false,
-  hasFinalReport: false
+  hasFinalReport: false,
+  backgroundOpacity: 1
 };
 
 const App: React.FC = () => {
-  // Initialize state from LocalStorage if available
-  const [trip, setTrip] = useState<Trip>(() => {
-    const savedCurrent = localStorage.getItem('visual_trip_planner_current');
-    return savedCurrent ? JSON.parse(savedCurrent) : INITIAL_TRIP;
-  });
-
-  const [savedTrips, setSavedTrips] = useState<Trip[]>(() => {
-    const savedHistory = localStorage.getItem('visual_trip_planner_history');
-    return savedHistory ? JSON.parse(savedHistory) : [];
-  });
+  // State initialization is now simple, data loading happens in useEffect
+  const [trip, setTrip] = useState<Trip>(INITIAL_TRIP);
+  const [savedTrips, setSavedTrips] = useState<Trip[]>([]);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'visualizer' | 'dashboard' | 'history' | 'report'>('visualizer');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -47,14 +44,50 @@ const App: React.FC = () => {
   const [sidebarWidth, setSidebarWidth] = useState(320);
   const isResizingRef = useRef(false);
   
-  // -- Persistence Effects --
+  // -- Asynchronous Load Effect --
   useEffect(() => {
-    localStorage.setItem('visual_trip_planner_current', JSON.stringify(trip));
-  }, [trip]);
+    const loadData = async () => {
+      try {
+        const [loadedTrip, loadedHistory] = await Promise.all([
+          storageService.loadCurrentTrip(),
+          storageService.loadHistory()
+        ]);
+
+        if (loadedTrip) {
+          // Ensure we merge with initial defaults to handle new fields like opacity if missing in old data
+          setTrip({ ...INITIAL_TRIP, ...loadedTrip });
+        }
+        if (loadedHistory) {
+          setSavedTrips(loadedHistory);
+        }
+      } catch (e) {
+        console.error("Failed to load initial data", e);
+      } finally {
+        setIsDataLoaded(true);
+      }
+    };
+
+    loadData();
+  }, []);
+
+  // -- Persistence Effects (Debounced) --
+  
+  // We use a ref to prevent saving the INITIAL_TRIP over the real data 
+  // before the real data has finished loading from IDB.
+  useEffect(() => {
+    if (!isDataLoaded) return;
+
+    const timeoutId = setTimeout(() => {
+      storageService.saveCurrentTrip(trip);
+    }, 1000); // 1 second debounce to avoid hammering the DB
+
+    return () => clearTimeout(timeoutId);
+  }, [trip, isDataLoaded]);
 
   useEffect(() => {
-    localStorage.setItem('visual_trip_planner_history', JSON.stringify(savedTrips));
-  }, [savedTrips]);
+    if (!isDataLoaded) return;
+    storageService.saveHistory(savedTrips);
+  }, [savedTrips, isDataLoaded]);
 
 
   // -- Derived State for Dates & Duration --
@@ -189,19 +222,17 @@ const App: React.FC = () => {
   
   const handleExportJSON = () => {
     // Create a Sanitized Export Object
-    // We strictly define what gets exported to avoid runtime conflicts
-    // We REMOVE the Trip ID so it's treated as a template/new plan on import.
     const exportData: Partial<Trip> = {
         title: trip.title,
         startDate: trip.startDate,
         endDate: trip.endDate,
         totalBudget: trip.totalBudget,
         backgroundImage: trip.backgroundImage,
+        backgroundOpacity: trip.backgroundOpacity,
         returnTrip: trip.returnTrip,
-        items: trip.items, // Internal IDs are kept for relationship mapping (options -> details), but regenerated on import
+        items: trip.items, 
         accommodations: trip.accommodations,
         createdAt: Date.now(),
-        // Explicitly exclude 'id' and 'hasFinalReport' to prevent ID conflicts or bad state
     };
 
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
@@ -242,6 +273,18 @@ const App: React.FC = () => {
       };
   }, []);
 
+  // -- Loading Screen --
+  if (!isDataLoaded) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-slate-50 text-slate-400">
+        <div className="flex flex-col items-center gap-4">
+           <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+           <p className="text-sm font-medium">Loading your trips...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen w-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
       
@@ -256,7 +299,6 @@ const App: React.FC = () => {
             className={`fixed lg:relative z-30 h-full transition-all duration-75 ease-out shadow-xl lg:shadow-none bg-white flex shrink-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} print:hidden`}
             style={{ width: isSidebarCollapsed ? '4rem' : `${sidebarWidth}px` }}
         >
-            {/* Added key={trip.id} to force remount on trip load, fixing population issues */}
             <ItineraryPanel 
                 key={trip.id}
                 items={trip.items} 

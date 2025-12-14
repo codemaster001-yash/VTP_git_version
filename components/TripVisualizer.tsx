@@ -64,7 +64,6 @@ const TransportInfoCard = ({
     onMouseDown: (e: React.MouseEvent) => void,
     prevArrival?: string // The arrival time at the CURRENT start location (from previous leg)
 }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
     const [validationError, setValidationError] = useState<string | null>(null);
     
     // Ensure we have a valid list of options. If not, initialize with current details or default.
@@ -74,6 +73,9 @@ const TransportInfoCard = ({
     // Refs for manual date picker triggering
     const departRef = useRef<HTMLInputElement>(null);
     const arriveRef = useRef<HTMLInputElement>(null);
+    
+    // UI state from props (persistence)
+    const isExpanded = !!item.isTransportInfoExpanded;
 
     // Sync state with props when item changes, but only if IDs mismatch to avoid typing lag
     useEffect(() => {
@@ -223,7 +225,7 @@ const TransportInfoCard = ({
     const toggleExpand = (e: React.MouseEvent) => {
         // Allow expand toggle even in "Pan Map" mode, as long as we aren't dragging it.
         e.stopPropagation();
-        setIsExpanded(!isExpanded);
+        onUpdate(item.id, { isTransportInfoExpanded: !isExpanded });
     };
     
     const handleDoubleClick = (e: React.MouseEvent) => {
@@ -311,7 +313,7 @@ const TransportInfoCard = ({
                             <Plus className="w-3 h-3" />
                         </button>
                         <div className="flex-1"></div>
-                        <button onClick={(e) => { e.stopPropagation(); setIsExpanded(false); }} className="text-slate-400 hover:text-slate-600" onMouseDown={(e) => e.stopPropagation()}>
+                        <button onClick={(e) => { e.stopPropagation(); toggleExpand(e); }} className="text-slate-400 hover:text-slate-600" onMouseDown={(e) => e.stopPropagation()}>
                             <X className="w-4 h-4" />
                         </button>
                     </div>
@@ -495,17 +497,23 @@ const TransportInfoCard = ({
 const TripVisualizer: React.FC<TripVisualizerProps> = ({ trip, onUpdateTrip, onUpdateItem, onAddItem, onUpdateBudget }) => {
   const [isEditing, setIsEditing] = useState(true);
   
-  // Canvas State
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  // Canvas State - Initialize from saved trip state if available
+  const [zoom, setZoom] = useState(trip.mapView?.zoom ?? 1);
+  const [pan, setPan] = useState(trip.mapView?.pan ?? { x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
-  const [bgOpacity, setBgOpacity] = useState(1);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [draggingType, setDraggingType] = useState<'pin' | 'hud'>('pin');
   
   const containerRef = useRef<HTMLDivElement>(null);
   const lastMouseRef = useRef<{ x: number, y: number } | null>(null);
   const [bgInput, setBgInput] = useState('');
+
+  // Save map state when it changes (Debounced by user interaction end would be ideal, 
+  // but updating parent state on every pan might be too heavy. 
+  // We'll update parent state on mouse up / wheel end)
+  const saveMapState = () => {
+      onUpdateTrip({ mapView: { zoom, pan } });
+  };
 
   // Calculate total spent for HUD
   const transportCost = trip.items.reduce((acc, item) => acc + item.cost, 0);
@@ -520,6 +528,8 @@ const TripVisualizer: React.FC<TripVisualizerProps> = ({ trip, onUpdateTrip, onU
     const scaleAmount = -e.deltaY * 0.001;
     const newZoom = Math.min(Math.max(0.1, zoom + scaleAmount), 5);
     setZoom(newZoom);
+    // Debouncing wheel save is complex, for now we save immediately on wheel as it's less frequent than mousemove
+    onUpdateTrip({ mapView: { zoom: newZoom, pan } });
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -585,6 +595,9 @@ const TripVisualizer: React.FC<TripVisualizerProps> = ({ trip, onUpdateTrip, onU
   };
 
   const handleMouseUp = () => {
+    if (isPanning) {
+        saveMapState(); // Save pan position on release
+    }
     setIsPanning(false);
     setDraggingId(null);
     lastMouseRef.current = null;
@@ -601,9 +614,6 @@ const TripVisualizer: React.FC<TripVisualizerProps> = ({ trip, onUpdateTrip, onU
     const y = e.clientY - rect.top;
     
     // Convert to percentage
-    // Note: rect.width and rect.height are the *visual* size (scaled).
-    // canvasX/Y are percentages. So (x / rect.width) * 100 works perfectly 
-    // because x is also in the scaled coordinate space.
     const canvasX = (x / rect.width) * 100;
     const canvasY = (y / rect.height) * 100;
 
@@ -612,7 +622,8 @@ const TripVisualizer: React.FC<TripVisualizerProps> = ({ trip, onUpdateTrip, onU
       location: { name: `Stop ${trip.items.length + 1}`, lat: 0, lng: 0, address: 'New Location' },
       canvasX, // Use calculated X
       canvasY, // Use calculated Y
-      cost: 0, category: 'Activity', type: 'Stop', transportToNext: TransportType.CAR
+      cost: 0, category: 'Activity', type: 'Stop', transportToNext: TransportType.CAR,
+      isExpanded: true
     };
     onAddItem(newItem);
   };
@@ -742,14 +753,37 @@ const TripVisualizer: React.FC<TripVisualizerProps> = ({ trip, onUpdateTrip, onU
            </div>
 
            <div className="flex items-center gap-2">
-                <button onClick={() => setZoom(Math.max(0.1, zoom - 0.1))} className="p-1.5 hover:bg-slate-100 rounded text-slate-600"><ZoomOut className="w-4 h-4" /></button>
-                <input type="range" min="0.1" max="3" step="0.1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
-                <button onClick={() => setZoom(Math.min(5, zoom + 0.1))} className="p-1.5 hover:bg-slate-100 rounded text-slate-600"><ZoomIn className="w-4 h-4" /></button>
-                <button onClick={() => { setZoom(1); setPan({x:0, y:0}); }} className="text-xs text-blue-600 hover:underline ml-1">Reset</button>
+                <button onClick={() => {
+                    setZoom(Math.max(0.1, zoom - 0.1));
+                    saveMapState();
+                }} className="p-1.5 hover:bg-slate-100 rounded text-slate-600"><ZoomOut className="w-4 h-4" /></button>
+                <input type="range" min="0.1" max="3" step="0.1" value={zoom} onChange={(e) => {
+                    const newZoom = parseFloat(e.target.value);
+                    setZoom(newZoom);
+                    onUpdateTrip({ mapView: { zoom: newZoom, pan } });
+                }} className="w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
+                <button onClick={() => {
+                    setZoom(Math.min(5, zoom + 0.1));
+                    saveMapState();
+                }} className="p-1.5 hover:bg-slate-100 rounded text-slate-600"><ZoomIn className="w-4 h-4" /></button>
+                <button onClick={() => { 
+                    setZoom(1); 
+                    setPan({x:0, y:0}); 
+                    onUpdateTrip({ mapView: { zoom: 1, pan: {x:0, y:0} } });
+                }} className="text-xs text-blue-600 hover:underline ml-1">Reset</button>
            </div>
            <div className="flex items-center gap-2 border-l border-slate-200 pl-4">
                 <Eye className="w-4 h-4 text-slate-400" />
-                <input type="range" min="0" max="1" step="0.05" value={bgOpacity} onChange={(e) => setBgOpacity(parseFloat(e.target.value))} className="w-20 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" title="Map Opacity" />
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="1" 
+                  step="0.05" 
+                  value={trip.backgroundOpacity ?? 1} 
+                  onChange={(e) => onUpdateTrip({ backgroundOpacity: parseFloat(e.target.value) })} 
+                  className="w-20 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" 
+                  title="Map Opacity" 
+                />
            </div>
         </div>
 
@@ -759,7 +793,23 @@ const TripVisualizer: React.FC<TripVisualizerProps> = ({ trip, onUpdateTrip, onU
                     <input type="text" placeholder="Map Image URL..." className="px-2 py-1.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-blue-500 w-32 bg-white text-slate-900" value={bgInput} onChange={(e) => setBgInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleBgSubmit()} />
                     <label className="cursor-pointer px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 text-xs font-medium flex items-center gap-1">
                         <Upload className="w-3 h-3" /> <span className="hidden sm:inline">Upload</span>
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => onUpdateTrip({ backgroundImage: reader.result as string }); reader.readAsDataURL(file); } }} />
+                        <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={(e) => { 
+                                const file = e.target.files?.[0]; 
+                                if (file) { 
+                                    if (file.size > 2.5 * 1024 * 1024) {
+                                        alert("Image is too large (max 2.5MB). Please use a smaller image to avoid storage issues.");
+                                        return;
+                                    }
+                                    const reader = new FileReader(); 
+                                    reader.onloadend = () => onUpdateTrip({ backgroundImage: reader.result as string }); 
+                                    reader.readAsDataURL(file); 
+                                } 
+                            }} 
+                        />
                     </label>
                 </div>
             )}
@@ -788,7 +838,7 @@ const TripVisualizer: React.FC<TripVisualizerProps> = ({ trip, onUpdateTrip, onU
             >
                 {/* Background Image Layer */}
                 {trip.backgroundImage ? (
-                    <div className="absolute inset-0 bg-cover bg-center bg-no-repeat pointer-events-none" style={{ backgroundImage: `url("${trip.backgroundImage}")`, opacity: bgOpacity }} />
+                    <div className="absolute inset-0 bg-cover bg-center bg-no-repeat pointer-events-none" style={{ backgroundImage: `url("${trip.backgroundImage}")`, opacity: trip.backgroundOpacity ?? 1 }} />
                 ) : (
                     <div className="absolute inset-0 flex items-center justify-center text-slate-400 select-none pointer-events-none border-2 border-dashed border-slate-300 m-10 rounded-xl opacity-50">
                         <div className="text-center">
