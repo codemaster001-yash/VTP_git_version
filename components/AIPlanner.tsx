@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { generateItinerary } from '../services/geminiService';
 import { TripItem, Accommodation, TransportType, SubItem, TransportDetails } from '../types';
@@ -6,32 +7,42 @@ import { Sparkles, Loader2, X } from 'lucide-react';
 interface AIPlannerProps {
   onPlanGenerated: (items: TripItem[], acc: Accommodation[], title: string) => void;
   onClose: () => void;
+  apiKey: string;
 }
 
-const AIPlanner: React.FC<AIPlannerProps> = ({ onPlanGenerated, onClose }) => {
+const AIPlanner: React.FC<AIPlannerProps> = ({ onPlanGenerated, onClose, apiKey }) => {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
 
   const mapTransportMode = (modeStr?: string): TransportType => {
-      const m = modeStr?.toLowerCase() || '';
-      if (m.includes('flight') || m.includes('plane')) return TransportType.FLIGHT;
+      if (!modeStr) return TransportType.CAR;
+      const m = modeStr.toLowerCase();
+      if (m.includes('flight') || m.includes('plane') || m.includes('air')) return TransportType.FLIGHT;
       if (m.includes('train') || m.includes('rail')) return TransportType.TRAIN;
-      if (m.includes('bus')) return TransportType.BUS;
-      if (m.includes('ferry') || m.includes('boat')) return TransportType.FERRY;
-      if (m.includes('walk')) return TransportType.WALK;
+      if (m.includes('bus') || m.includes('coach')) return TransportType.BUS;
+      if (m.includes('ferry') || m.includes('boat') || m.includes('ship')) return TransportType.FERRY;
+      if (m.includes('walk') || m.includes('foot')) return TransportType.WALK;
+      if (m.includes('none')) return TransportType.NONE;
       return TransportType.CAR;
   };
 
   const handleGenerate = async () => {
     if (!prompt) return;
+    if (!apiKey) {
+        alert("Please enter your Gemini API Key in Settings to use the AI Planner.");
+        return;
+    }
+
     setLoading(true);
     try {
       const startDateObj = new Date(); // Start today for the plan
       const startDateStr = startDateObj.toISOString().split('T')[0];
       
-      const result = await generateItinerary(prompt, startDateStr);
+      console.log("Generating itinerary for:", prompt);
+      const result = await generateItinerary(prompt, startDateStr, apiKey);
+      console.log("Generated Result:", result);
       
-      if (result && result.stops) {
+      if (result && result.stops && Array.isArray(result.stops)) {
         let currentCursorDate = new Date(startDateObj);
 
         // Transform API result to app types
@@ -54,9 +65,6 @@ const AIPlanner: React.FC<AIPlannerProps> = ({ onPlanGenerated, onClose }) => {
                 cost: stop.transportToNext?.cost || 0,
                 duration: stop.transportToNext?.duration || '',
                 departureTime: departureTime, // Depart after stay
-                // For the next item's arrival, we'd theoretically add transport duration, 
-                // but for simplicity we'll just set arrival of next item to this departure + offset in the next loop iteration if needed.
-                // However, our visualizer uses the *next* item's arrival time for logic, so we set this leg's info here.
                 isBooked: false
             };
 
@@ -64,23 +72,16 @@ const AIPlanner: React.FC<AIPlannerProps> = ({ onPlanGenerated, onClose }) => {
             const subItems: SubItem[] = (stop.activities || []).map((act: any) => ({
                 id: crypto.randomUUID(),
                 name: act.name,
-                type: act.type === 'Food' ? 'Food' : 'Activity',
+                type: act.type === 'Food' ? 'Food' : (act.type === 'Stay' ? 'Stay' : 'Activity'),
                 cost: act.cost || 0,
                 notes: act.description,
-                // Distribute activities across the stay duration roughly? 
-                // For now, leave date unset or set to arrival date
                 date: '' 
             }));
 
             // Update Cursor for NEXT iteration
-            // Add transport time buffer? Let's assume travel takes a few hours, 
-            // but for date logic, next stop starts roughly when this one ends.
             currentCursorDate = new Date(departureDate); 
 
             // Calculate arrival time for the transport leg (approximate)
-            // If the AI gave a duration like "2h", we could parse it, but for now let's just use departureTime
-            // In a real app, we'd parse "2h" -> add to departureTime -> set as arrivalTime of this transport leg.
-            // Let's try a simple heuristic:
             let travelHours = 4; // default
             if (stop.transportToNext?.duration) {
                 const d = stop.transportToNext.duration;
@@ -98,7 +99,7 @@ const AIPlanner: React.FC<AIPlannerProps> = ({ onPlanGenerated, onClose }) => {
                     lat: stop.lat || 0,
                     lng: stop.lng || 0,
                 },
-                cost: 0, // Stop cost is sum of subitems usually, or we could add a base cost
+                cost: 0, 
                 type: 'Stop',
                 category: 'Activity',
                 notes: stop.description,
@@ -111,21 +112,25 @@ const AIPlanner: React.FC<AIPlannerProps> = ({ onPlanGenerated, onClose }) => {
             };
         });
 
-        // Generate some accommodations based on the stops (Mocking, as the new prompt focuses on activities)
         const accommodations: Accommodation[] = items.map(item => ({
             id: crypto.randomUUID(),
             name: `Hotel in ${item.location.name}`,
-            costPerNight: 1000 + Math.floor(Math.random() * 5000), // Random placeholder
-            checkIn: item.transportDetails?.departureTime || new Date().toISOString(), // Rough approx
+            costPerNight: 1000 + Math.floor(Math.random() * 5000), 
+            checkIn: item.transportDetails?.departureTime || new Date().toISOString(), 
             checkOut: item.transportDetails?.departureTime || new Date().toISOString(),
             status: 'Candidate'
         }));
 
         onPlanGenerated(items, accommodations, result.title || "AI Generated Trip");
+      } else {
+          console.warn("Received result but no stops found:", result);
+          alert("The AI generated a response but it was empty or invalid. Please try rephrasing your request.");
       }
     } catch (e) {
-      console.error(e);
-      alert("Failed to generate plan. Please try again.");
+      console.error("AI Planner Error:", e);
+      let msg = "Failed to generate plan. Please check your API Key and try again.";
+      if (e instanceof Error) msg = e.message;
+      alert(msg);
     } finally {
       setLoading(false);
     }

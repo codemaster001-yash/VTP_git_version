@@ -1,6 +1,7 @@
+
 import React from 'react';
-import { Trip, TripItem, TransportType } from '../types';
-import { Calendar, MapPin, DollarSign, Clock, Plane, Train, Car, Bus, Ship, Footprints, Printer, ArrowLeft, CheckCircle2, BedDouble, Utensils, Camera, StickyNote, ArrowRight, Ban, Moon, AlertCircle } from 'lucide-react';
+import { Trip, TripItem, TransportType, SubItem } from '../types';
+import { Calendar, MapPin, DollarSign, Clock, Plane, Train, Car, Bus, Ship, Footprints, Printer, ArrowLeft, CheckCircle2, BedDouble, Utensils, Camera, StickyNote, ArrowRight, Ban, Moon, AlertCircle, Info } from 'lucide-react';
 
 interface FinalReportProps {
   trip: Trip;
@@ -51,7 +52,7 @@ const FinalReport: React.FC<FinalReportProps> = ({ trip, onBack }) => {
       if (arr && dep) {
           const diffMs = dep.getTime() - arr.getTime();
           const nights = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-          const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24)); // Roughly same logic
+          const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24)); 
           if (nights > 0) durationStr = `${nights} Nights`;
           else durationStr = "Day Visit";
       }
@@ -59,8 +60,62 @@ const FinalReport: React.FC<FinalReportProps> = ({ trip, onBack }) => {
       return {
           arrivalText: arr ? arr.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit' }) : "Start of Trip",
           departureText: dep ? dep.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit' }) : "End of Trip",
-          duration: durationStr
+          duration: durationStr,
+          arrivalDateObj: arr
       };
+  };
+
+  const groupSubItemsByDate = (subItems: SubItem[], arrivalDate?: Date) => {
+      const grouped: Record<string, SubItem[]> = {};
+      const noDateKey = "Unscheduled";
+
+      subItems.forEach(sub => {
+          let dateKey = noDateKey;
+          if (sub.date) {
+              // Group by YYYY-MM-DD
+              dateKey = sub.date.split('T')[0]; 
+          }
+          if (!grouped[dateKey]) grouped[dateKey] = [];
+          grouped[dateKey].push(sub);
+      });
+
+      // Sort logic
+      return Object.keys(grouped).sort().map(dateKey => {
+          let title = "Unscheduled Activities";
+          let subTitle = "";
+
+          if (dateKey !== noDateKey) {
+              const d = new Date(dateKey);
+              title = d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+              
+              // Calculate Day Number relative to stop arrival if possible
+              if (arrivalDate) {
+                  const arrMidnight = new Date(arrivalDate);
+                  arrMidnight.setHours(0,0,0,0);
+                  const currMidnight = new Date(d);
+                  currMidnight.setHours(0,0,0,0);
+                  
+                  // Use UTC to avoid DST issues roughly
+                  const diffTime = currMidnight.getTime() - arrMidnight.getTime();
+                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                  
+                  if (diffDays >= 0) {
+                      subTitle = `Day ${diffDays + 1}`;
+                  }
+              }
+          }
+
+          return {
+              dateKey,
+              title,
+              subTitle,
+              items: grouped[dateKey].sort((a, b) => {
+                  if (!a.date) return 1; 
+                  if (!b.date) return -1;
+                  return new Date(a.date).getTime() - new Date(b.date).getTime();
+              })
+          };
+      });
   };
 
   return (
@@ -119,31 +174,17 @@ const FinalReport: React.FC<FinalReportProps> = ({ trip, onBack }) => {
             <div className="relative border-l-2 border-slate-200 ml-4 space-y-12">
                {trip.items.map((item, index) => {
                   const isLastItem = index === trip.items.length - 1;
-                  // Handle Next Item: if return trip is on and this is last item, next is Start.
                   const nextItem = trip.items[index + 1] || (trip.returnTrip && isLastItem ? trip.items[0] : null);
                   
-                  // Sorting Sub-items by date
-                  const sortedSubItems = item.subItems 
-                    ? [...item.subItems].sort((a, b) => {
-                        if (!a.date) return 1;
-                        if (!b.date) return -1;
-                        return new Date(a.date).getTime() - new Date(b.date).getTime();
-                      })
-                    : [];
-
-                  const hasSubItems = sortedSubItems.length > 0;
-                  
                   // Calculate Timeline for this stop
-                  // Arrival comes from Previous Item's transport arrival.
                   const prevItem = index > 0 ? trip.items[index - 1] : null;
-                  
-                  // If return trip and index 0, arrival might be from last item if loop completed? 
-                  // Standard logic: Start of trip usually defined by Start Date or Departure of Item 1.
-                  
                   const arrivalTime = (index === 0) ? undefined : prevItem?.transportDetails?.arrivalTime;
                   const departureTime = item.transportDetails?.departureTime;
                   
                   const timeline = getStopTimeline(arrivalTime, departureTime);
+
+                  // Group Sub Items by Date
+                  const groupedActivities = groupSubItemsByDate(item.subItems || [], timeline.arrivalDateObj || undefined);
 
                   return (
                      <div key={item.id} className="relative pl-8 break-inside-avoid">
@@ -159,7 +200,6 @@ const FinalReport: React.FC<FinalReportProps> = ({ trip, onBack }) => {
                                 <MapPin className="w-6 h-6 text-blue-600" /> {item.location.name}
                             </h2>
                             
-                            {/* Updated Location Info: Times instead of address */}
                             <div className="flex flex-wrap items-center gap-6 text-sm text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100 inline-flex">
                                 <div>
                                     <span className="text-[10px] font-bold text-slate-400 uppercase block">Arrived</span>
@@ -178,44 +218,66 @@ const FinalReport: React.FC<FinalReportProps> = ({ trip, onBack }) => {
                             </div>
                         </div>
 
-                        {/* Sub Items (Activities/Stays) - Rendered BEFORE Transport, Sorted by Date */}
-                        {hasSubItems && (
-                            <div className="ml-2 mb-6">
-                                <div className="text-[10px] font-bold text-slate-400 uppercase mb-2 ml-1">Itinerary at this stop</div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {sortedSubItems.map((sub) => (
-                                        <div key={sub.id} className="flex items-start gap-3 p-3 rounded-lg border border-slate-100 bg-slate-50 hover:bg-white hover:shadow-sm transition-all break-inside-avoid">
-                                            <div className={`p-2 rounded-full shrink-0 ${
-                                                sub.type === 'Stay' ? 'bg-indigo-100 text-indigo-600' : 
-                                                sub.type === 'Food' ? 'bg-orange-100 text-orange-600' : 
-                                                'bg-emerald-100 text-emerald-600'
-                                            }`}>
-                                                {sub.type === 'Stay' && <BedDouble className="w-4 h-4" />}
-                                                {sub.type === 'Food' && <Utensils className="w-4 h-4" />}
-                                                {sub.type === 'Activity' && <Camera className="w-4 h-4" />}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex justify-between items-start">
-                                                    <h4 className="font-bold text-slate-700 text-sm">{sub.name || 'Untitled'}</h4>
-                                                    {sub.cost > 0 && <span className="text-xs font-mono text-slate-500 bg-white px-1.5 rounded border border-slate-200">₹{sub.cost}</span>}
-                                                </div>
-                                                {sub.date && (
-                                                    <div className="text-xs text-slate-400 mt-1 flex items-center gap-1">
-                                                        <Clock className="w-3 h-3" />
-                                                        {new Date(sub.date).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
-                                                    </div>
-                                                )}
-                                            </div>
+                        {/* Sub Items - Grouped by Day */}
+                        {groupedActivities.length > 0 && (
+                            <div className="ml-2 mb-6 space-y-6">
+                                {groupedActivities.map((group) => (
+                                    <div key={group.dateKey} className="border-l-2 border-slate-100 pl-4">
+                                        <div className="flex items-baseline gap-2 mb-3">
+                                            {group.subTitle && <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{group.subTitle}</span>}
+                                            <h3 className="font-bold text-slate-700 text-sm">{group.title}</h3>
                                         </div>
-                                    ))}
-                                </div>
+                                        
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            {group.items.map((sub) => (
+                                                <div key={sub.id} className="flex flex-col p-3 rounded-lg border border-slate-100 bg-slate-50 hover:bg-white hover:shadow-sm transition-all break-inside-avoid">
+                                                    <div className="flex items-start gap-3">
+                                                        <div className={`p-2 rounded-full shrink-0 ${
+                                                            sub.type === 'Stay' ? 'bg-indigo-100 text-indigo-600' : 
+                                                            sub.type === 'Food' ? 'bg-orange-100 text-orange-600' : 
+                                                            'bg-emerald-100 text-emerald-600'
+                                                        }`}>
+                                                            {sub.type === 'Stay' && <BedDouble className="w-4 h-4" />}
+                                                            {sub.type === 'Food' && <Utensils className="w-4 h-4" />}
+                                                            {sub.type === 'Activity' && <Camera className="w-4 h-4" />}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex justify-between items-start">
+                                                                <h4 className="font-bold text-slate-700 text-sm flex items-center gap-2">
+                                                                    {sub.name || 'Untitled'}
+                                                                    {sub.notes && (
+                                                                        <Info className="w-3.5 h-3.5 text-blue-400" />
+                                                                    )}
+                                                                </h4>
+                                                                {sub.cost > 0 && <span className="text-xs font-mono text-slate-500 bg-white px-1.5 rounded border border-slate-200">₹{sub.cost}</span>}
+                                                            </div>
+                                                            {sub.date && (
+                                                                <div className="text-xs text-slate-400 mt-1 flex items-center gap-1">
+                                                                    <Clock className="w-3 h-3" />
+                                                                    {new Date(sub.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    {/* NOTE Display */}
+                                                    {sub.notes && (
+                                                        <div className="mt-2 ml-11 text-xs text-slate-600 bg-white p-2 rounded border border-slate-100 italic">
+                                                            "{sub.notes}"
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         )}
 
-                        {/* Transport Leg (To Next Item OR Return to Start) */}
+                        {/* Transport Leg */}
                         {nextItem && item.transportDetails && (
                              <div className="mt-8 mb-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50 break-inside-avoid relative overflow-hidden">
-                                 {/* Background Watermark Icon */}
+                                 {/* Background Watermark */}
                                  <div className="absolute top-0 right-0 p-2 opacity-5 pointer-events-none">
                                       {getTransportIcon(item.transportDetails.mode, "w-32 h-32 text-blue-900")}
                                  </div>
@@ -259,10 +321,8 @@ const FinalReport: React.FC<FinalReportProps> = ({ trip, onBack }) => {
                                         </div>
                                     </div>
                                     
-                                    {/* Booking & Status Badge */}
                                     <div className="mt-4 pt-3 border-t border-blue-100 flex justify-between items-center">
                                          <div className="flex items-center gap-4">
-                                            {/* Booking Status */}
                                             {item.transportDetails.isBooked ? (
                                                 <span className="flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-100 px-2 py-1 rounded-full">
                                                     <CheckCircle2 className="w-3 h-3" /> Booked
@@ -273,7 +333,6 @@ const FinalReport: React.FC<FinalReportProps> = ({ trip, onBack }) => {
                                                 </span>
                                             )}
 
-                                            {/* Train Status (if applicable) */}
                                             {item.transportDetails.mode === TransportType.TRAIN && item.transportDetails.trainStatus && (
                                                 <span className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${
                                                     item.transportDetails.trainStatus === 'Confirmed' 

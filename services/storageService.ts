@@ -2,9 +2,10 @@
 import { Trip } from '../types';
 
 const DB_NAME = 'VisualTripPlannerDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Incremented version to trigger upgrade
 const STORE_CURRENT = 'current_trip';
 const STORE_HISTORY = 'trip_history';
+const STORE_SETTINGS = 'user_settings';
 
 // Open the Database
 const openDB = (): Promise<IDBDatabase> => {
@@ -21,6 +22,9 @@ const openDB = (): Promise<IDBDatabase> => {
       }
       if (!db.objectStoreNames.contains(STORE_HISTORY)) {
         db.createObjectStore(STORE_HISTORY);
+      }
+      if (!db.objectStoreNames.contains(STORE_SETTINGS)) {
+        db.createObjectStore(STORE_SETTINGS);
       }
     };
   });
@@ -85,6 +89,22 @@ export const storageService = {
     } catch (e) {
       console.error("Failed to load history from IDB", e);
       return [];
+    }
+  },
+
+  saveApiKey: async (key: string) => {
+    try {
+      await saveToStore(STORE_SETTINGS, 'api_key', key);
+    } catch (e) {
+      console.error("Failed to save API key", e);
+    }
+  },
+
+  loadApiKey: async (): Promise<string | null> => {
+    try {
+      return await loadFromStore(STORE_SETTINGS, 'api_key');
+    } catch (e) {
+      return null;
     }
   }
 };

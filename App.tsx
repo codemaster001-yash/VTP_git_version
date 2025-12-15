@@ -8,9 +8,10 @@ import Dashboard from './components/Dashboard';
 import AIPlanner from './components/AIPlanner';
 import TripHistory from './components/TripHistory';
 import AboutModal from './components/AboutModal';
+import SettingsModal from './components/SettingsModal';
 import FinalReport from './components/FinalReport';
 import { storageService } from './services/storageService';
-import { Layout, Map as MapIcon, PieChart, Sparkles, Share2, Menu, Save, History as HistoryIcon, Edit2, Calendar, HelpCircle, Download, Upload, Plane, Hotel, MapPin, IndianRupee, Clock, FileText, FilePlus, Loader2 } from 'lucide-react';
+import { Layout, Map as MapIcon, PieChart, Sparkles, Share2, Menu, Save, History as HistoryIcon, Edit2, Calendar, HelpCircle, Download, Upload, Plane, Hotel, MapPin, IndianRupee, Clock, FileText, FilePlus, Loader2, Settings } from 'lucide-react';
 
 const INITIAL_TRIP: Trip = {
   id: crypto.randomUUID(),
@@ -19,11 +20,12 @@ const INITIAL_TRIP: Trip = {
   endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
   items: [],
   accommodations: [],
+  mapImages: [], 
+  stickyNotes: [], // Initialize empty sticky notes
   totalBudget: 50000, 
   createdAt: Date.now(),
   returnTrip: false,
   hasFinalReport: false,
-  backgroundOpacity: 1
 };
 
 const App: React.FC = () => {
@@ -31,11 +33,13 @@ const App: React.FC = () => {
   const [trip, setTrip] = useState<Trip>(INITIAL_TRIP);
   const [savedTrips, setSavedTrips] = useState<Trip[]>([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [apiKey, setApiKey] = useState<string>(process.env.API_KEY || '');
 
   const [activeTab, setActiveTab] = useState<'visualizer' | 'dashboard' | 'history' | 'report'>('visualizer');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [showAIPlanner, setShowAIPlanner] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -48,17 +52,21 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [loadedTrip, loadedHistory] = await Promise.all([
+        const [loadedTrip, loadedHistory, loadedKey] = await Promise.all([
           storageService.loadCurrentTrip(),
-          storageService.loadHistory()
+          storageService.loadHistory(),
+          storageService.loadApiKey()
         ]);
 
         if (loadedTrip) {
-          // Ensure we merge with initial defaults to handle new fields like opacity if missing in old data
+          // Ensure we merge with initial defaults to handle new fields
           setTrip({ ...INITIAL_TRIP, ...loadedTrip });
         }
         if (loadedHistory) {
           setSavedTrips(loadedHistory);
+        }
+        if (loadedKey) {
+            setApiKey(loadedKey);
         }
       } catch (e) {
         console.error("Failed to load initial data", e);
@@ -227,8 +235,8 @@ const App: React.FC = () => {
         startDate: trip.startDate,
         endDate: trip.endDate,
         totalBudget: trip.totalBudget,
-        backgroundImage: trip.backgroundImage,
-        backgroundOpacity: trip.backgroundOpacity,
+        mapImages: trip.mapImages,
+        stickyNotes: trip.stickyNotes,
         returnTrip: trip.returnTrip,
         items: trip.items, 
         accommodations: trip.accommodations,
@@ -308,6 +316,7 @@ const App: React.FC = () => {
                 isCollapsed={isSidebarCollapsed}
                 onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
                 onStartResize={startResizing}
+                apiKey={apiKey}
             />
         </aside>
       )}
@@ -402,6 +411,10 @@ const App: React.FC = () => {
                  <HelpCircle className="w-5 h-5" />
              </button>
 
+             <button onClick={() => setShowSettings(true)} className="p-2 text-slate-500 hover:bg-slate-100 rounded-full" title="Settings (API Key)">
+                 <Settings className="w-5 h-5" />
+             </button>
+
              <button onClick={handleSaveTrip} className="p-2 text-slate-500 hover:bg-slate-100 rounded-full" title="Save Trip to History">
                  <Save className="w-5 h-5" />
              </button>
@@ -464,11 +477,19 @@ const App: React.FC = () => {
 
       {/* Modals */}
       {showAIPlanner && (
-        <AIPlanner onPlanGenerated={handleAIPlan} onClose={() => setShowAIPlanner(false)} />
+        <AIPlanner onPlanGenerated={handleAIPlan} onClose={() => setShowAIPlanner(false)} apiKey={apiKey} />
       )}
       
       {showAbout && (
         <AboutModal onClose={() => setShowAbout(false)} />
+      )}
+
+      {showSettings && (
+          <SettingsModal 
+            currentKey={apiKey} 
+            onSave={(newKey) => setApiKey(newKey)} 
+            onClose={() => setShowSettings(false)} 
+          />
       )}
     </div>
   );

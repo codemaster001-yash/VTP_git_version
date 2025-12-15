@@ -1,7 +1,5 @@
-import { GoogleGenAI, Type } from "@google/genai";
 
-const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+import { GoogleGenAI, Type } from "@google/genai";
 
 /**
  * Robustly cleans and attempts to extract JSON from AI output.
@@ -9,46 +7,48 @@ const ai = new GoogleGenAI({ apiKey });
 const safeJsonParse = (text: string): any => {
     if (!text) throw new Error("Empty response from AI");
 
-    // 1. Try cleaning markdown wrapper
-    let clean = text.replace(/^```(json)?\s*/, '').replace(/\s*```$/, '').trim();
-    
-    // 2. Try to find the first '{' and last '}' to extract the object
-    const start = clean.indexOf('{');
-    const end = clean.lastIndexOf('}');
-    
-    if (start !== -1 && end !== -1 && end > start) {
-        clean = clean.substring(start, end + 1);
+    // Attempt to find the outermost JSON object
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+
+    if (start === -1 || end === -1 || start >= end) {
+        // Fallback: If no brackets found, maybe it's just raw text that looks like JSON? 
+        // Try parsing the whole thing if it doesn't look like markdown
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            console.warn("Raw JSON Parse Failed:", text.substring(0, 100) + "...");
+            throw new Error("Response does not contain a valid JSON object structure.");
+        }
     }
 
+    const jsonStr = text.substring(start, end + 1);
+
     try {
-        return JSON.parse(clean);
+        return JSON.parse(jsonStr);
     } catch (e) {
-        // 3. Fallback: If truncation occurred (unexpected end of input), we might want to fail gracefully
-        // or attempt to close it? For now, we just log and re-throw, as a partial plan is dangerous.
-        console.warn("JSON Parse Failed:", e);
-        throw new Error("Failed to parse AI response. The plan might be too large or malformed.");
+        console.warn("JSON Parse Failed on extracted string:", jsonStr.substring(0, 100) + "...");
+        throw new Error("Failed to parse AI response. The plan might be malformed.");
     }
 };
 
 /**
  * Uses Gemini with Google Maps grounding to find a location's coordinates.
  */
-export const searchLocation = async (query: string): Promise<{ name: string; lat: number; lng: number; address: string } | null> => {
+export const searchLocation = async (query: string, apiKey: string): Promise<{ name: string; lat: number; lng: number; address: string } | null> => {
+  if (!apiKey) {
+      console.warn("No API Key provided for search");
+      return null;
+  }
+
   try {
+    const ai = new GoogleGenAI({ apiKey });
+    // Use simple prompt-based JSON for search as well to be consistent
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `I need coordinates for "${query}". Return ONLY a JSON object with keys: name (string), lat (number), lng (number), address (string).`,
+      contents: `I need coordinates for "${query}". Return ONLY a raw JSON object (no markdown) with keys: name (string), lat (number), lng (number), address (string).`,
       config: {
         responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            name: { type: Type.STRING },
-            lat: { type: Type.NUMBER },
-            lng: { type: Type.NUMBER },
-            address: { type: Type.STRING }
-          }
-        }
       }
     });
     
@@ -61,91 +61,80 @@ export const searchLocation = async (query: string): Promise<{ name: string; lat
         }
     }
     
-    // Fallback if AI returns nothing or invalid JSON, but we have a query
-    return {
-        name: query,
-        lat: 0, 
-        lng: 0,
-        address: ''
-    };
+    return { name: query, lat: 0, lng: 0, address: '' };
 
   } catch (error) {
     console.error("Gemini Search Error:", error);
-    return {
-        name: query,
-        lat: 0,
-        lng: 0,
-        address: ''
-    };
+    return { name: query, lat: 0, lng: 0, address: '' };
   }
 };
 
 /**
  * Generates a full itinerary based on a prompt.
  */
-export const generateItinerary = async (prompt: string, startDate: string) => {
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `Plan a detailed multi-destination trip based on this request: "${prompt}". The start date is ${startDate}.
+export const generateItinerary = async (prompt: string, startDate: string, apiKey: string) => {
+  if (!apiKey) {
+      throw new Error("API Key is missing. Please add it in Settings.");
+  }
 
-      RULES:
-      1. Organize the trip by MAJOR STOPS.
-      2. For each Major Stop, list specific activities.
-      3. Suggest Transport Mode to *next* stop.
-      
-      Return a JSON structure matching the schema provided.`,
-      config: {
-        responseMimeType: "application/json",
-        maxOutputTokens: 8192,
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            stops: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  locationName: { type: Type.STRING },
-                  lat: { type: Type.NUMBER },
-                  lng: { type: Type.NUMBER },
-                  description: { type: Type.STRING },
-                  stayDuration: { type: Type.INTEGER },
-                  activities: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            name: { type: Type.STRING },
-                            type: { type: Type.STRING, enum: ['Activity', 'Food', 'Stay'] },
-                            cost: { type: Type.NUMBER },
-                            description: { type: Type.STRING }
-                        }
-                    }
-                  },
-                  transportToNext: {
-                      type: Type.OBJECT,
-                      properties: {
-                          mode: { type: Type.STRING, enum: ['Flight', 'Train', 'Car', 'Bus', 'Ferry', 'Walk'] },
-                          duration: { type: Type.STRING },
-                          cost: { type: Type.NUMBER }
-                      }
-                  }
-                },
-                required: ['locationName', 'lat', 'lng', 'stayDuration', 'activities']
-              }
-            }
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    
+    const systemInstruction = `You are an expert travel planner. 
+    Create a detailed multi-destination trip plan.
+    
+    REQUIRED OUTPUT FORMAT (JSON ONLY):
+    {
+      "title": "A catchy title for the trip",
+      "stops": [
+        {
+          "locationName": "City or Place Name",
+          "lat": 0.0,
+          "lng": 0.0,
+          "description": "Brief description of why we are stopping here",
+          "stayDuration": 2,
+          "activities": [
+             { "name": "Activity Name", "type": "Activity", "cost": 0, "description": "Short note" },
+             { "name": "Hotel Name", "type": "Stay", "cost": 0, "description": "Short note" },
+             { "name": "Restaurant Name", "type": "Food", "cost": 0, "description": "Short note" }
+          ],
+          "transportToNext": {
+             "mode": "Flight", 
+             "duration": "2h 30m",
+             "cost": 150
           }
         }
+      ]
+    }
+    
+    RULES:
+    1. "transportToNext" describes how to get to the *next* stop in the list. For the last stop, set mode to "None".
+    2. Transport modes must be one of: Flight, Train, Car, Bus, Ferry, Walk.
+    3. Activity types must be one of: Activity, Food, Stay.
+    4. Coordinates (lat/lng) must be accurate for the location.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Plan a detailed trip based on this request: "${prompt}". The start date is ${startDate}.`,
+      config: {
+        responseMimeType: "application/json",
+        systemInstruction: systemInstruction,
+        // Remove explicit responseSchema to prevent validation failures on complex nested objects
       }
     });
 
     const text = response.text;
+    console.log("Raw AI Response:", text); // Keep debug log
+
     if (text) {
-      return safeJsonParse(text);
+      const parsed = safeJsonParse(text);
+      if (!parsed.stops || !Array.isArray(parsed.stops)) {
+          throw new Error("Invalid response format: 'stops' array is missing.");
+      }
+      return parsed;
     }
-    throw new Error("No data returned");
+    throw new Error("No data returned from AI service.");
 
   } catch (error) {
     console.error("Gemini Itinerary Generation Error:", error);

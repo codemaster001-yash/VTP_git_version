@@ -1,6 +1,8 @@
+
 import React, { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { TripItem, TransportType, ExpenseCategory, SubItem } from '../types';
-import { MapPin, Trash2, Plus, Search, Tag, IndianRupee, GripVertical, BedDouble, Camera, Utensils, StickyNote, ChevronDown, ChevronRight, CalendarClock, ChevronLeft, PanelLeftClose, PanelLeftOpen, CalendarDays, Moon } from 'lucide-react';
+import { MapPin, Trash2, Plus, Search, Tag, IndianRupee, GripVertical, BedDouble, Camera, Utensils, StickyNote, ChevronDown, ChevronRight, CalendarClock, ChevronLeft, PanelLeftClose, PanelLeftOpen, CalendarDays, Moon, X, Edit3 } from 'lucide-react';
 import { searchLocation } from '../services/geminiService';
 
 interface ItineraryPanelProps {
@@ -11,9 +13,10 @@ interface ItineraryPanelProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   onStartResize: (e: React.MouseEvent) => void;
+  apiKey: string;
 }
 
-const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSelect, selectedId, isCollapsed, onToggleCollapse, onStartResize }) => {
+const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSelect, selectedId, isCollapsed, onToggleCollapse, onStartResize, apiKey }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const dragItem = useRef<number | null>(null);
@@ -51,9 +54,14 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSele
   // -- Add Stop --
   const handleAddLocation = async () => {
     if (!searchQuery.trim()) return;
+    if (!apiKey) {
+        alert("Please enter your Gemini API Key in Settings to use search.");
+        return;
+    }
+
     setIsSearching(true);
     
-    const result = await searchLocation(searchQuery);
+    const result = await searchLocation(searchQuery, apiKey);
     
     if (result) {
       const newItem: TripItem = {
@@ -124,7 +132,8 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSele
           name: '', // Empty name so placeholder shows
           type: type === 'Stay' ? 'Stay' : type === 'Food' ? 'Food' : 'Activity',
           cost: 0,
-          date: '' 
+          date: '',
+          notes: ''
       };
       
       const newSubItems = [...(item.subItems || []), newSub];
@@ -371,14 +380,35 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ items, setItems, onSele
   );
 };
 
-// Extracted Row Component for cleaner date handling
+// Extracted Row Component for cleaner date handling and Notes Popover
 const SubItemRow = ({ item, sub, onUpdate, onDelete }: { item: TripItem, sub: SubItem, onUpdate: (id: string, u: Partial<SubItem>) => void, onDelete: (id: string) => void }) => {
+    const [showNotes, setShowNotes] = useState(false);
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    const [coords, setCoords] = useState<{top: number, left: number} | null>(null);
+
+    const toggleNotes = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (showNotes) {
+            setShowNotes(false);
+        } else {
+            // Calculate position relative to the button
+            if (buttonRef.current) {
+                const rect = buttonRef.current.getBoundingClientRect();
+                setCoords({
+                    top: rect.top, // Align top with button
+                    left: rect.right + 8 // Position to the right with small gap
+                });
+            }
+            setShowNotes(true);
+        }
+    };
+
     const displayDate = sub.date 
         ? new Date(sub.date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit' }) 
         : 'Set Date';
 
     return (
-        <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow group">
+        <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow group relative">
             {/* Top Row: Icon + Name */}
             <div className="flex items-center gap-2">
                 <div className={`p-1.5 rounded-full shrink-0 ${
@@ -389,6 +419,7 @@ const SubItemRow = ({ item, sub, onUpdate, onDelete }: { item: TripItem, sub: Su
                     {sub.type === 'Stay' && <BedDouble className="w-3.5 h-3.5" />}
                     {sub.type === 'Activity' && <Camera className="w-3.5 h-3.5" />}
                     {sub.type === 'Food' && <Utensils className="w-3.5 h-3.5" />}
+                    {sub.type === 'Note' && <StickyNote className="w-3.5 h-3.5" />}
                 </div>
                 
                 <input 
@@ -399,7 +430,7 @@ const SubItemRow = ({ item, sub, onUpdate, onDelete }: { item: TripItem, sub: Su
                 />
             </div>
 
-            {/* Bottom Row: Date | Cost | Delete */}
+            {/* Bottom Row: Date | Cost | Tools */}
             <div className="flex items-center justify-between mt-2 gap-2">
                 
                 {/* Date Picker Area (Left Aligned) */}
@@ -425,18 +456,62 @@ const SubItemRow = ({ item, sub, onUpdate, onDelete }: { item: TripItem, sub: Su
                     />
                 </div>
 
-                {/* Cost & Delete (Right Aligned) */}
-                <div className="flex items-center gap-2 shrink-0">
+                {/* Right Aligned Tools: Note, Cost, Delete */}
+                <div className="flex items-center gap-1 shrink-0 relative">
+                     {/* Note Button */}
+                     <button 
+                        ref={buttonRef}
+                        onClick={toggleNotes}
+                        className={`p-1.5 rounded-md transition-colors relative ${sub.notes ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' : 'text-slate-400 hover:bg-slate-50'}`}
+                        title="Add Note"
+                     >
+                         <StickyNote className="w-3.5 h-3.5" />
+                         {sub.notes && <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-blue-500 rounded-full border border-white"></div>}
+                     </button>
+                     
+                     {/* Floating Note Dialog (Popover via Portal) */}
+                     {showNotes && createPortal(
+                        <div className="fixed inset-0 z-[9999] isolate">
+                            {/* Backdrop - Covers whole screen */}
+                            <div className="absolute inset-0 bg-black/5" onClick={() => setShowNotes(false)}></div>
+                            
+                            {/* Dialog Content */}
+                            <div 
+                                className="absolute bg-white rounded-lg shadow-xl border border-slate-200 w-64 animate-in zoom-in-95 duration-200"
+                                style={{
+                                    top: coords ? `${coords.top}px` : '50%',
+                                    left: coords ? `${coords.left}px` : '50%',
+                                }}
+                            >
+                                 <div className="flex items-center justify-between p-2 border-b border-slate-100 bg-slate-50 rounded-t-lg">
+                                     <span className="text-xs font-bold text-slate-500 uppercase">Notes</span>
+                                     <button onClick={() => setShowNotes(false)} className="text-slate-400 hover:text-slate-600 p-1"><X className="w-3 h-3" /></button>
+                                 </div>
+                                 <textarea 
+                                    className="w-full h-24 p-2 text-xs text-slate-900 bg-white resize-none focus:outline-none rounded-b-lg placeholder:text-slate-400"
+                                    placeholder="Add details, booking numbers, or reminders..."
+                                    value={sub.notes || ''}
+                                    onChange={(e) => onUpdate(sub.id, { notes: e.target.value })}
+                                    autoFocus
+                                 />
+                            </div>
+                        </div>,
+                        document.body
+                     )}
+
+                    {/* Cost Input */}
                     <div className="flex items-center bg-slate-50 px-2 py-1 rounded-md border border-slate-200 focus-within:ring-1 focus-within:ring-blue-200">
                         <span className="text-slate-400 text-[10px] mr-1">₹</span>
                         <input 
                             type="number" 
-                            className="w-14 bg-transparent text-right text-xs font-mono focus:outline-none"
+                            className="w-12 bg-transparent text-right text-xs font-mono focus:outline-none"
                             value={sub.cost === 0 ? '' : sub.cost}
                             placeholder="0"
                             onChange={(e) => onUpdate(sub.id, { cost: parseFloat(e.target.value) || 0 })}
                         />
                     </div>
+                    
+                    {/* Delete */}
                     <button 
                         onClick={() => onDelete(sub.id)} 
                         className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"

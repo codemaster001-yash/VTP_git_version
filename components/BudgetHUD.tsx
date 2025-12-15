@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { DollarSign, Edit2, AlertCircle, CheckCircle, IndianRupee, ChevronDown, ChevronUp } from 'lucide-react';
+
+import React, { useState, useEffect } from 'react';
+import { Edit2, AlertCircle, CheckCircle, IndianRupee, ChevronUp } from 'lucide-react';
 
 interface BudgetHUDProps {
   totalBudget: number;
@@ -9,8 +10,17 @@ interface BudgetHUDProps {
 
 const BudgetHUD: React.FC<BudgetHUDProps> = ({ totalBudget, totalSpent, onUpdateBudget }) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  // Initialize from localStorage if available
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    const saved = localStorage.getItem('budgetHudCollapsed');
+    return saved === 'true';
+  });
   const [tempBudget, setTempBudget] = useState(totalBudget.toString());
+
+  // Save state whenever it changes
+  useEffect(() => {
+    localStorage.setItem('budgetHudCollapsed', isCollapsed.toString());
+  }, [isCollapsed]);
 
   const percentage = Math.min((totalSpent / totalBudget) * 100, 100);
   

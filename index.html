@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -20,6 +21,18 @@
       }
       ::-webkit-scrollbar-thumb:hover {
         background: #94a3b8; 
+      }
+
+      /* Hide Number Input Spinners (Chrome, Safari, Edge, Opera) */
+      input::-webkit-outer-spin-button,
+      input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+
+      /* Hide Number Input Spinners (Firefox) */
+      input[type=number] {
+        -moz-appearance: textfield;
       }
 
       /* Print Styles for PDF Export */

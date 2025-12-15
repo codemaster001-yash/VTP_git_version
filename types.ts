@@ -1,3 +1,4 @@
+
 export type ExpenseCategory = 'Transport' | 'Accommodation' | 'Activity' | 'Food' | 'Other';
 
 export interface Location {
@@ -52,6 +53,29 @@ export interface SubItem {
   date?: string; // ISO datetime string
 }
 
+export interface MapImage {
+  id: string;
+  url: string;
+  x: number; // Pixel coordinate relative to canvas origin
+  y: number; // Pixel coordinate relative to canvas origin
+  width: number; // Width in pixels
+  height: number; // Height in pixels
+  opacity: number;
+  rotation?: number; 
+  locked?: boolean; 
+}
+
+export interface StickyNote {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  color: string; // Hex code for background
+  locked?: boolean;
+}
+
 export interface TripItem {
   id: string;
   location: Location;
@@ -89,8 +113,14 @@ export interface Trip {
   title: string;
   startDate: string;
   endDate: string;
-  backgroundImage?: string; // Custom user uploaded map/image
-  backgroundOpacity?: number; // Opacity of the background image
+  
+  // New: Multiple independent images & Sticky Notes
+  mapImages?: MapImage[]; 
+  stickyNotes?: StickyNote[];
+
+  // Legacy/Deprecated
+  backgroundImage?: string; 
+  backgroundOpacity?: number; 
   
   // Map View State
   mapView?: {
